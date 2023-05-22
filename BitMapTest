@@ -1,0 +1,741 @@
+
+/*
+SD card read/write/Draw to 24 bit BitMap (.BMP) files
+Simple commands allow text, lines, circles and pixels to be drawn to a .BMP file.  Creates new blank .BMP files as well.
+
+ * SD card attached to SPI bus as follows:
+ ** MOSI - pin 11
+ ** MISO - pin 12
+ ** CLK - pin 13
+ ** CS - pin 4
+Disclaimer:
+The lower left corner of your bmp file will be drawn as though it is at 0,0.  399,299 will be the upper right corner of a 400x300 bitmap.  
+Lines and circles that start or end outside the bounds of the BMP will still be drawn if they cross the plane of the bmp file. 
+
+Usage:
+All BMP images are 24-Bit bitmap images.  You can put any bitmap image on the SD card and just use the Drawing routines to set pixels or draw lines onto that bitmap but the SD BMP file
+must be saved as a 24-Bit BMP file from Windows.
+
+The speed of drawing to a bitmap is slow.
+
+NewBmp(String file,long width, long height, byte rgbcolorRed,byte rgbcolorGreen,byte rgbcolorBlue)
+-Creates a new bitmap (overwrites existing no warning) width, heigth and rgb color of back ground must be provided. 
+(0,0,0)= black (255,255,255) = white and a rainbow between.  Large bitmaps may take several minutes to create.
+-A 400x300 pixel bitmap on a 16Mhz UNO took 17s to create.
+-A 800x600 pixel bitmap on the same UNO took 67s to create.
+
+DrawString(String file, String str, long x, long y)
+-Yes you can write strings, and yes there are some strict rules.
+-You must have a file called font.bmp on the SD card.  Download a copy from ????
+-This file must be 900x14 pixels and must have all characters between ! and z (in ASCII order) in Courrier New Font size 12 (BOLD).  
+-Each letter is then 10 bits wide and 14 high.  WriteStrBmp opens this file, moves over to capture the pixels of the desired letter and copies to the bmp file ANDing the pixels with the background pixel.  
+-If you want a different font or different color font, make the bmp file and modify ReadLetter and DrawLetter and Letter byte array.  
+-The ° symbol for degrees is the _ (underscore) character.
+-The string "1234567890ABCDEFGHIHJKLMNOPQRSTUVWXYZ" took 7.1s to draw.
+
+DrawPixel(String file,long x, long y, int size, byte rgbcolorRed,byte rgbcolorGreen,byte rgbcolorBlue)
+-Only 4 sizes of pixel can be set, 1, 2, 3, 4  These are shaped just like Paint in Windows for these sizes.
+-Pixel size 3 took 35ms to write
+
+GetPixel(String file,long x, longy)
+-Reads the RGB of the desired pixel into the RGB[] byte array.
+-Reading a single pixel took 35ms
+
+DrawLine(String File, int x1, int y1, int x2, int y2, byte cr, byte cg, byte cb )
+-Draws a single pixel width line between points (x1,y1)-(x2,y2) using the rgb color provided.
+-A long line across a 400 pixel bitmap took 1728ms to write
+-If the line starts or ends outside the bitmap, it will still be drawn where the line
+-does cross the plane of the bmp file.
+
+DrawBox(String File, int x1, int y1, in x2, int y2, byte cr, byte cg, byte cb )
+-Draws a box with corners matching x1,y1 and x2,y2
+-no fill
+
+
+DrawCircle(String file, int x, int y, int rd, byte cr, byte cg, byte cb)
+-Draws a single pixel width circle at center x,y and radius rd using the rgb color provided.
+-A large circle took 10.429s to write
+-A small circle took 1310ms to write
+-If the circle starts or ends outside the bitmap, it will still be drawn where the line
+-does cross the plane of the bmp file.
+-This circle code is not very efficient. To get rid of gaps, I use the normal circle equation and run
+  it twice, once in the X direction and then again in the y direction.
+  
+***THERE IS NO FILL CIRCLE OR FILL BOX ETC.... 
+
+ */
+ 
+#include <SD.h>
+byte letter[20][42];
+File myFile; //BMP file to Open
+long Hw,Hh; //BMP Width and Height
+long  pad4 = 0; //24 Bit BMP requires even 4 bit padding for each line of pixels
+//for a 400 pixel width BMP file pad4 would be 0 (400/4 = 100) but
+//for a 402 pixel width, pad4 would be 2 (402/4 = 100.5) (.5 * 4 = 2)
+int led = 13;//flash an LED
+byte RGB[3];//Read the RGB of a single pixel from the 24bit BMP file.
+
+void setup()
+{
+
+Serial.begin(9600);
+  Serial.print("Initializing SD card...");
+  // On the Ethernet Shield, CS is pin 4. It's set as an output by default.
+  // Note that even if it's not used as the CS pin, the hardware SS pin 
+  // (10 on most Arduino boards, 53 on the Mega) must be left as an output 
+  // or the SD library functions will not work. 
+   pinMode(10, OUTPUT);
+   pinMode(led, OUTPUT); 
+  if (!SD.begin(4)) {
+    Serial.println("initialization failed!");
+    while(1);
+  }
+  Serial.println("initialization done.");
+  digitalWrite(led, LOW);
+  delay(2000);
+}
+
+void loop()
+{
+  
+  
+   String str = "1234567890ABCDEFGHIHJKLMNOPQRSTUVWXYZ";//a test string
+   String file = "gn2.bmp";//the file to create
+   Serial.print("Start ");
+   Serial.println(millis());
+
+
+   //NewBmp(file,400,300,127,127,127);
+
+   //DrawPixel(file,3,199,149,0,0,0);
+
+   //DrawLine(file,0,0,399,299,77,44,34);
+
+   DrawBox(file,10,10,110,110,15,122,34);
+
+   //DrawCircle(file,200,150,150,0,0,255);
+
+   DrawCircle(file,200,150,20,3,222,88);
+
+   //DrawString(file,str,45,145);
+   
+   //GetPixel(file, 22, 102);
+  
+   Serial.print("Done ");   
+   Serial.println(millis());//That took 174 seconds!  But it worked!
+   //If you start out with a blank BMP file on the card and skip the NewBmp comand
+   //it only takes   s to draw the objects.
+   
+   digitalWrite(led, HIGH);
+   while(1);
+}
+int OpnFile(String file){//opens the BMP file for New or Mod
+char filen[12];
+byte co = 0;
+byte e1[4];
+byte d = 0;
+for (d = 0; d <= 11; d++) filen[d] = file[d];
+myFile = SD.open(filen,FILE_WRITE);
+if (myFile){
+  co = 18;
+  myFile.seek(co);
+  e1[0] = myFile.read();
+  e1[1] = myFile.read();
+  e1[2] = myFile.read();
+  e1[3] = myFile.read();
+  Hw = *((long *)e1);//reads the Width in pixels.
+  
+  e1[0] = myFile.read();
+  e1[1] = myFile.read();
+  e1[2] = myFile.read();
+  e1[3] = myFile.read();
+  Hh = *((long *)e1);//reads the Height in pixels.
+  
+  pad4 = 4 - ((Hw * 3) & 3);
+  if (pad4  == 4) pad4  = 0;//calculates the 4 byte padding 
+  return(1);
+}
+myFile.close();
+return(0);
+}
+int GetPixel(String file, long x, long y){//open file, point to pixel in BMP file and read 3 bytes.
+//pixel color is saved B,G,R
+  long pnt;
+  int op = OpnFile(file);
+  if (op){
+    pnt = 54 + (x * 3) + (y * 3 * Hw) + (pad4 * y);
+    myFile.seek(pnt);
+    RGB[2] = myFile.read();
+    RGB[1] = myFile.read();
+    RGB[0] = myFile.read();
+    myFile.close();
+    return(1);
+  }
+  myFile.close();
+  return(0);
+}
+int DrawPixel(String file, int sze, long x, long y, byte cr, byte cg, byte cb){
+  //Draw a pixel on the screen.  If pixel size 2 3 or 4 is used, the lower left corner of the pixel
+  //is drawn at the X,Y given.
+  long pnt;
+  int d = 0;
+  OpnFile(file);
+  pnt = 54 + (x * 3) + (y * 3 * Hw) + (pad4 * y);
+  if (myFile){
+    myFile.seek(pnt);
+    switch (sze){
+       case 1:
+        myFile.write(cb);//a single pixel
+        myFile.write(cg);
+        myFile.write(cr);  
+        break;
+       case 2:
+          myFile.write(cb);//2 pixels by 2 pixels.
+          myFile.write(cg);
+          myFile.write(cr);  
+          myFile.write(cb);
+          myFile.write(cg);
+          myFile.write(cr);  
+          pnt += (Hw * 3) + pad4; 
+          myFile.seek(pnt);
+          myFile.write(cb);
+          myFile.write(cg);
+          myFile.write(cr);  
+          myFile.write(cb);
+          myFile.write(cg);
+          myFile.write(cr);            
+        break;
+       
+       case 3://3 pixels wide and high in a + shape
+          pnt +=  3; 
+          myFile.seek(pnt);   
+          myFile.write(cb);
+          myFile.write(cg);
+          myFile.write(cr);  
+          pnt += (Hw * 3) - 3 + pad4; 
+          myFile.seek(pnt);          
+          for (d = 0; d <= 2; d++){
+            myFile.write(cb);
+            myFile.write(cg);
+            myFile.write(cr);  
+          }   
+          pnt += (Hw * 3) + 3 + pad4; 
+          myFile.seek(pnt);      
+          myFile.write(cb);
+          myFile.write(cg);
+          myFile.write(cr);            
+        break;
+       
+       case 4://4 pixels wide and high in fat + shape
+          pnt +=  3; 
+          myFile.seek(pnt);   
+          for (d = 0; d <= 1; d++){
+            myFile.write(cb);
+            myFile.write(cg);
+            myFile.write(cr);  
+          }   
+          pnt += (Hw * 3) - 3 + pad4; 
+          myFile.seek(pnt);          
+          for (d = 0; d <= 3; d++){
+            myFile.write(cb);
+            myFile.write(cg);
+            myFile.write(cr);  
+          }   
+          pnt += (Hw * 3) + pad4; 
+          myFile.seek(pnt);      
+          for (d = 0; d <= 3; d++){
+            myFile.write(cb);
+            myFile.write(cg);
+            myFile.write(cr);  
+          }   
+          pnt += (Hw * 3) + 3 + pad4; 
+          myFile.seek(pnt);      
+          for (d = 0; d <= 1; d++){
+            myFile.write(cb);
+            myFile.write(cg);
+            myFile.write(cr);  
+          }         
+        break; 
+      
+      
+    }
+    
+   myFile.close();
+   return(1); 
+  } 
+myFile.close();
+return(0);  
+}
+int DrawString(String file, String str, long x, long y){
+  //write(draw) the string to the BMP file  if a space is encountered then skip 6 pixels and keep writing
+  int a,b;
+  char stc;
+  a = str.length();
+  for (b = 0; b < a; b++){
+    stc = str[b];
+    if (stc == ' ') x += 6;//if space, skip 6 pixels.
+    else {
+        DrawLetter(file,stc,x,y);//draw the letter
+        x += 10;
+    }
+  }
+}
+
+int DrawLetter(String file, char stc, long x, long y){
+  //letter is read from font.bmp, file is open and letter is drawn to file.
+  long pnt,upnt;
+  int a,b;
+  byte pk;
+  char filen[12];
+  int iR = ReadLetter(stc);//read the letter pixel pattern from font.bmp
+  if (iR == 0) return(0);//no letter read, no font.bmp file on SD???
+  OpnFile(file);
+  pnt = 54 + (x * 3) + (y * 3 * Hw) + (pad4 * y);
+  upnt = x * 3;
+  if (myFile and (y >= Hh || x >= Hw)){
+    myFile.close();
+    return(2);//2 - off screen do nothing
+  }
+  if (myFile){
+      //Serial.println(filen);
+      myFile.seek(pnt);
+      //Serial.println(pnt);
+      
+      for (b = 0; b <= 19; b++){
+        for (a = 0; a <= 41; a++){
+          if (upnt < (Hw * 3)){
+            pk = myFile.peek();//peek at pixel in background for ANDing with new pixel.
+            myFile.write(letter[b][a] & pk);//write the ANDed pixel
+            upnt++;//keep track if letters are running off bmp file
+          }
+        }
+        pnt += (Hw * 3) + pad4; 
+        upnt = x * 3;//renew pointer for off-page check
+        myFile.seek(pnt);
+
+      }
+      myFile.close();
+      return(1);
+  }
+ myFile.close();
+ return(0);
+}
+int ReadLetter(char in){
+  long pnt;
+  int a,b;
+  pnt = 54 + (in - '!') * 3 * 14;//point to the letter pixel location
+  myFile = SD.open("font.bmp");
+  if (myFile){
+    myFile.seek(pnt);
+    
+    for (b = 0; b <= 19; b++){//read the 10x14 pixel representing the letter desired.
+      for (a = 0; a <= 41; a++){
+        letter[b][a] = myFile.read();
+      }
+      pnt += 1280 * 3; //
+      myFile.seek(pnt);
+    }
+    myFile.close();
+    return(1);
+  }
+myFile.close();
+return(0);  
+}
+
+int NewBmp(String file, int x, int y, byte cr, byte cg, byte cb){
+//create a new 24 bit bitmap image on the SD card.  Be careful, you can create some huge
+//bitmaps and it will take a long,long time.
+byte ByteArray[4];
+unsigned long sze = 0;
+long px = 0;
+long py = 0;
+px = x;
+py = y;
+byte co = 0;
+
+char filen[12];
+byte d = 0;
+for (d = 0; d <= 11; d++) filen[d] = file[d];
+if (SD.exists(filen)) SD.remove(filen);//gone like goose.
+myFile = SD.open(filen, FILE_WRITE);
+if (myFile){
+  myFile.seek(0);
+  //you can look up what the 55 byte header looks like for a 24 bit BMP file...
+  co = 0x42;
+  myFile.write(co);
+  //B
+  co = 0x4d;
+  myFile.write(co);
+  //M
+  sze = 54 + (px * py * 3);
+  ByteArray[0] = sze>>24 & 0xff;
+  ByteArray[1] = sze>>16 & 0xff;
+  ByteArray[2] = sze>>8 & 0xff;
+  ByteArray[3] = sze & 0xff;
+  
+  myFile.write(ByteArray[3]);
+  //size 4 bytes
+  myFile.write(ByteArray[2]);
+  //size 4 bytes
+  myFile.write(ByteArray[1]);
+  //size 4 bytes
+  myFile.write(ByteArray[0]);
+  //size 4 bytes
+  co = 0;
+  myFile.write(co);
+  myFile.write(co);
+  myFile.write(co);
+  myFile.write(co);
+  co = 0x36;
+  myFile.write(co);
+  co = 0;
+  myFile.write(co);
+  myFile.write(co);
+  myFile.write(co);
+  co = 0x28;
+  myFile.write(co);
+  co = 0;
+  myFile.write(co);
+  myFile.write(co);
+  myFile.write(co);
+  sze = x;
+  ByteArray[0] = sze>>24 & 0xff;
+  ByteArray[1] = sze>>16 & 0xff;
+  ByteArray[2] = sze>>8 & 0xff;
+  ByteArray[3] = sze & 0xff;
+  
+  myFile.write(ByteArray[3]);
+  //size 4 bytes
+  myFile.write(ByteArray[2]);
+  //size 4 bytes
+  myFile.write(ByteArray[1]);
+  //size 4 bytes
+  myFile.write(ByteArray[0]);
+  //size 4 bytes
+  sze = y;
+  ByteArray[0] = sze>>24 & 0xff;
+  ByteArray[1] = sze>>16 & 0xff;
+  ByteArray[2] = sze>>8 & 0xff;
+  ByteArray[3] = sze & 0xff;
+  
+  myFile.write(ByteArray[3]);
+  //size 4 bytes
+  myFile.write(ByteArray[2]);
+  //size 4 bytes
+  myFile.write(ByteArray[1]);
+  //size 4 bytes
+  myFile.write(ByteArray[0]);
+  //size 4 bytes
+  co = 1;
+  myFile.write(co);
+  co = 0;
+  myFile.write(co);
+  co = 0x18;
+  myFile.write(co);
+  co = 0;
+  myFile.write(co);
+  myFile.write(co);
+  myFile.write(co);
+  myFile.write(co);
+  myFile.write(co);
+  //raw data in pixel array including 4 byte padding
+  sze = px * py * 3;
+  int im;
+  im = 4 - ((x * 3) & 3);
+  if (im == 4) im = 0;
+  sze = sze + (im * y);
+  ByteArray[0] = sze>>24 & 0xff;
+  ByteArray[1] = sze>>16 & 0xff;
+  ByteArray[2] = sze>>8 & 0xff;
+  ByteArray[3] = sze & 0xff;
+  
+  myFile.write(ByteArray[3]);
+  //size 4 bytes
+  myFile.write(ByteArray[2]);
+  //size 4 bytes
+  myFile.write(ByteArray[1]);
+  //size 4 bytes
+  myFile.write(ByteArray[0]);
+  //size 4 bytes
+  int b = 0;
+  int a = 0;
+  co = 0;
+  for (b = 0;b <= 15;b++){
+  	myFile.write(co);
+  }
+  //all the kool aid is mixed here
+  for (b = 1; b <= y; b++) {
+  	for (a = 1; a <= x; a++) {
+  	  myFile.write(cb);
+  	  myFile.write(cg);
+  	  myFile.write(cr);
+  		
+  	}
+  	for (a = 1; a <= im; a++) {//padding with 0
+          co = 0;
+  	  myFile.write(co);
+  	}
+  }
+  myFile.close();
+  return(1);
+}
+myFile.close();
+return(0);
+}
+int DrawCircle(String file, int x, int y, int rd, byte cr, byte cg, byte cb)
+{
+//draw a circle at center x,y and radius rd.  Still tries to draw even if rd > bitmap width or height
+//in case any part of the circle might fall on the bmp.
+
+long pnt = 0;
+long px = 0;
+long py = 0;
+int pxr = 0;
+int pyr = 0;
+
+float ac = 0;
+float dd = 0;
+
+OpnFile(file);
+if (myFile){
+  px = x - rd;
+  if (px < 0) px = 0;
+  pxr = x + rd;
+  
+  int a = x;
+  int b = y;
+  //(x-a)^2 + (y-b)^2 = r^2
+  //y = sqr((r^2) - (x-a)^2) + b
+  //run through circle in X direction starting at left tangent of circle (270) and
+  //ending at right tangent (90).
+  
+  int rx,ry;
+  float rd2 = rd;
+  rd2 = rd2 * rd2;
+  
+  float rxa2 = 0;
+  
+  for (rx = px; rx <= pxr; rx++) {
+    if (rx < Hw){ 
+  	px = rx;
+          rxa2 = (float)(rx - a)* (float)(rx - a);
+  	ac = sqrt(rd2 - rxa2) + b;
+  	py = ac;
+  	if (py < Hh ) {
+  		pnt = 54 + (px * 3) + (py * 3 * Hw) + (pad4 * py);
+  		myFile.seek(pnt);
+  		myFile.write(cb);
+  		myFile.write(cg);
+  		myFile.write(cr);
+  	}
+          py = b - (py - b);
+  	if (py >= 0 && py < Hh) {
+  		pnt = 54 + (px * 3) + (py * 3 * Hw) + (pad4 * py);
+  		myFile.seek(pnt);
+  		myFile.write(cb);
+  		myFile.write(cg);
+  		myFile.write(cr);
+  	}
+    }
+  }
+  nxc:
+  py = y - rd;
+  if (py < 0) py = 0;
+  pyr = y + rd;
+  //(x-a)^2 + (y-b)^2 = r^2
+  //x = sqr((r^2) - (y-b)^2) + a
+  //run through circle 2nd time in Y direction to catch any pixels missed above.
+  
+  for (ry = py; ry <= pyr; ry++) {
+    if(ry < Hh){
+  	py = ry;
+          rxa2 = (float)(ry - b)*(float)(ry - b);
+  	ac = sqrt(rd2 - rxa2) + a;
+  	px = ac;
+  	if (px < Hw & px >= 0) {
+  		pnt = 54 + (px * 3) + (py * 3 * Hw) + (pad4 * py);
+  		myFile.seek(pnt);
+  		myFile.write(cb);
+  		myFile.write(cg);
+  		myFile.write(cr);
+  	}
+          px = a - (px - a);
+  	if (px >= 0 && px < Hw) {
+  		pnt = 54 + (px * 3) + (py * 3 * Hw) + (pad4 * py);
+  		myFile.seek(pnt);
+  		myFile.write(cb);
+  		myFile.write(cg);
+  		myFile.write(cr);
+  	}
+    }
+  }
+cls:
+  myFile.close();
+  return(1);
+}
+myFile.close();
+return(0);
+
+}
+int DrawBox(String file,int x1, int y1, int x2, int y2, byte cr, byte cg, byte cb ){
+  if (x1 != x2 && y1 != y2){
+     DrawLine(file,x1,y1,x1,y2,cr,cg,cb);
+     DrawLine(file,x1,y2,x2,y2,cr,cg,cb);
+     DrawLine(file,x2,y2,x2,y1,cr,cg,cb);
+     DrawLine(file,x2,y1,x1,y1,cr,cg,cb);
+     return(1);
+  }
+  return(2);//not valid pair of numbers
+}
+
+int DrawLine(String file, int x1, int y1, int x2, int y2, byte cr, byte cg, byte cb ){
+//draws a single pixel line on the bitmap.  It can start or end off the boundary of the bmp
+//but only the part that lies inside the bmp is drawn.
+//if line is not vert or horiz then the equation of the line is calculated and drawn
+//using either the X direction or Y direction depending on which can maximize
+//the slope of the line and hit all the pixels.
+int a = 0;
+long pnt = 0;
+long px = 0;
+long py = 0;
+float m = 0;
+float b = 0;
+int pxl;
+int numpx = 0;
+
+
+if (x1 == x2 && y1 == y2){//obviously a joke.  
+//just draw a single pixel if x's and y's match.
+  DrawPixel(file,1,x1,y1,cr,cg,cb);
+  return(1);    
+}
+
+if (x2 == x1) {
+	//vertical line just set pixels of a vertical set of pixels.
+  px = x1;
+  if (y1 < y2) py = y1;
+  else py = y2;
+  numpx = abs(y2 - y1);
+  OpnFile(file);
+    if (myFile){
+
+        if (px >= Hw || py >= Hh){
+            myFile.close();
+            return(2);//exit if line outside of bitmap
+        }
+        if (py + numpx >= Hh){
+           numpx = Hh - py - 1; //short number of pixels if they will travel off bitmap
+        }
+	pnt = 54 + (px * 3) + (py * 3 * Hw) + (pad4 * py);
+	myFile.seek(pnt);
+	for (pxl = 0; pxl <= numpx; pxl++) {
+		myFile.write(cb);
+		myFile.write(cg);
+		myFile.write(cr);
+		pnt = pnt + (Hw * 3) + pad4;
+		myFile.seek(pnt);
+	}
+        myFile.close();
+        return(1);
+    }
+    myFile.close();
+    return(0);
+} else if (y2 == y1) {
+	//horizontal Line
+  if (x1 < x2) {
+	px = x1;
+  } else {
+	px = x2;
+  }
+  py = y1;
+  numpx = abs(x2 - x1);
+  OpnFile(file);
+  if (myFile){
+        if (px >= Hw || py >= Hh){
+          myFile.close();
+          return(2);//exit if line outside of bitmap
+        }
+        if (px + numpx >= Hw){
+           numpx = Hw - py - 1; //short number of pixels if they will travel off bitmap
+        }
+	pnt = 54 + (px * 3) + (py * 3 * Hw) + (pad4 * py);
+	myFile.seek(pnt);
+	for (pxl = 0; pxl <= numpx; pxl++) {
+		myFile.write(cb);
+		myFile.write(cg);
+		myFile.write(cr);
+	}
+        myFile.close();
+        return(1);
+  }
+  myFile.close();
+  return(0);
+} else {
+  int stx,stpx,sty,stpy;
+  m = (float)(y2 - y1) / (float)(x2 - x1);
+  b = (float)(y1 - x1 * m);
+
+  if (x1 < x2) {
+    stx = x1;
+    stpx = x2;
+    px = x1;
+  } else {
+    stx = x2;
+    stpx = x1;
+    px = x2;
+  }
+  if (y1 < y2) {
+    sty = y1;
+    stpy = y2;
+    py = y1;
+  } else {
+    sty = y2;
+    stpy = y1;
+    py = y2;
+  }
+  OpnFile(file);
+    if (myFile){
+	int oldy = 0;
+	float ny = 0;
+	float nx = 0;
+        int zy = 0;
+	oldy = py;
+	int zx = 0;
+	if (abs(x2 - x1) > abs(y2 - y1)) {
+		for (zx = stx; zx <= stpx; zx++) {
+		  ny = m * zx + b;
+		  px = zx;
+		  py = ny;
+	          if (px < Hw && py < Hh){
+		    pnt = 54 + (px * 3) + (py * 3 * Hw) + (pad4 * py);
+  		    myFile.seek(pnt);
+  		    myFile.write(cb);
+  		    myFile.write(cg);
+  		    myFile.write(cr);
+                  }
+		}
+	} else {
+		for (zy = sty; zy <= stpy; zy++) {
+		  nx = ((zy - b) / m);
+		  px = nx;
+		  py = zy;
+                  if (px < Hw && py < Hh){
+		    pnt = 54 + (px * 3) + (py * 3 * Hw) + (pad4 * py);
+		    myFile.seek(pnt);
+		    myFile.write(cb);
+		    myFile.write(cg);
+		    myFile.write(cr);
+                  }
+		}
+        }
+        myFile.close();
+        return(1);
+  }
+
+}
+myFile.close();
+
+return(0);
+}
+
+
